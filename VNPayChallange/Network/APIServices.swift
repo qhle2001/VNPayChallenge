@@ -8,6 +8,11 @@
 import Foundation
 
 final class APIServices {
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
 
     func fetchPhotos(
         page: Int = 1, 
@@ -34,7 +39,7 @@ final class APIServices {
         isRetry: Bool = false,
         completion: @escaping (Result<[Photo], NetworkError>, Bool) -> Void
     ){
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        session.dataTask(with: request) { data, response, error in
             if let error = error as NSError? {
                 if error.domain == NSURLErrorDomain {
                     let autoRetryError: [Int] = [NSURLErrorTimedOut, NSURLErrorNetworkConnectionLost, NSURLErrorNotConnectedToInternet]

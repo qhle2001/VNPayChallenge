@@ -24,7 +24,7 @@ final class SearchBarView: UIView {
         return btn
     }()
     
-    private var onSearch: ((String) -> Void)?
+    private var onSearch: ((String?, Bool) -> Void)?
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -68,7 +68,7 @@ final class SearchBarView: UIView {
         searchButton.addTarget(self, action: #selector(didTapSearch), for: .touchUpInside)
     }
     
-    func onSearchAction(_ callback: @escaping (String) -> Void){
+    func onSearchAction(_ callback: @escaping (String?, Bool) -> Void){
         self.onSearch = callback
     }
     
@@ -78,7 +78,9 @@ final class SearchBarView: UIView {
     
     private func executeSearch() {
         textField.resignFirstResponder()
-        onSearch?(textField.text ?? "")
+        let keyword = textField.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isSearching = !(keyword?.isEmpty ?? true)
+        onSearch?(keyword, isSearching)
     }
 }
 

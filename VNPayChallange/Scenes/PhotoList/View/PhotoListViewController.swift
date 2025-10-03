@@ -22,6 +22,8 @@ final class PhotoListViewController: UIViewController {
     private let viewModel = PhotoListViewModel()
     private var isLoadingMore: Bool = false
     private var currentPage: Int = 1
+    private var isSearching: Bool = false
+    private var searchKeyword: String?
 
     // Data
     private var photosOriginal: [Photo] = []
@@ -67,8 +69,12 @@ final class PhotoListViewController: UIViewController {
                 self.currentPage -= 1
             } else {
                 self.photosOriginal.append(contentsOf: self.viewModel.photos)
-                self.photosFiltered.append(contentsOf: self.viewModel.photos)
-                self.tableView.reloadData()
+                if self.isSearching, let keyword = self.searchKeyword {
+                    self.filterPhotos(with: keyword, isSearching: self.isSearching)
+                } else {
+                    self.photosFiltered.append(contentsOf: self.viewModel.photos)
+                    self.tableView.reloadData()
+                }
             }
             self.isLoadingMore = false
             self.activityIndicator.stopAnimating()          
@@ -173,20 +179,24 @@ final class PhotoListViewController: UIViewController {
 
     // MARK: - Search Setup
     private func setupSearch() {
-        searchBar.onSearchAction { [weak self] query in
-            self?.filterPhotos(with: query)
+        searchBar.onSearchAction { [weak self] query, isSearching in
+            self?.isSearching = isSearching
+            self?.searchKeyword = query
+            self?.filterPhotos(with: query, isSearching: isSearching)
         }
     }
 
     // MARK: - Filter
-    private func filterPhotos(with query: String) {
-        if query.isEmpty {
+    private func filterPhotos(with query: String?, isSearching: Bool) {
+        guard let query = query, !query.isEmpty else {
             photosFiltered = photosOriginal
-        } else {
-            photosFiltered = photosOriginal.filter { photo in
-                photo.author.lowercased().contains(query.lowercased()) ||
-                "\(photo.id)".contains(query)
-            }
+            tableView.reloadData()
+            return
+        }
+
+        photosFiltered = photosOriginal.filter { photo in
+            photo.author.lowercased().contains(query.lowercased()) ||
+            "\(photo.id)".contains(query)
         }
         tableView.reloadData()
     }

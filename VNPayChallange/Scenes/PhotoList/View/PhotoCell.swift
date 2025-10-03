@@ -56,6 +56,7 @@ final class PhotoCell: UITableViewCell {
         label.text = "Opps!"
         label.isHidden = true
         label.textColor = .black
+        label.textAlignment = .center
         label.font = .boldSystemFont(ofSize: 16)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
