@@ -8,7 +8,10 @@
 import UIKit
 
 final class PhotoCell: UITableViewCell {
-
+    
+    private var aspectConstraint: NSLayoutConstraint?
+    private var currentURL: URL?
+    
     private let photoImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
@@ -16,7 +19,7 @@ final class PhotoCell: UITableViewCell {
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
     }()
-
+    
     private let authorLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 14)
@@ -24,7 +27,40 @@ final class PhotoCell: UITableViewCell {
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
+    
+    private let sizeLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 14)
+        label.textColor = .darkGray
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
 
+    private let infoStack: UIStackView = {
+        let info = UIStackView()
+        info.axis = .vertical
+        info.spacing = 4
+        info.translatesAutoresizingMaskIntoConstraints = false
+        return info
+    }()
+    
+    private let activityIndicator: UIActivityIndicatorView = {
+        let indicator = UIActivityIndicatorView(style: .medium)
+        indicator.hidesWhenStopped = true
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        return indicator
+    }()
+
+    private let errorLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Opps!"
+        label.isHidden = true
+        label.textColor = .black
+        label.font = .boldSystemFont(ofSize: 16)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         setupUI()
@@ -39,36 +75,74 @@ final class PhotoCell: UITableViewCell {
 
     private func setupUI() {
         contentView.addSubview(photoImageView)
-        contentView.addSubview(authorLabel)
+        contentView.addSubview(infoStack)
+        photoImageView.addSubview(activityIndicator)
+        photoImageView.addSubview(errorLabel)
+        
+        infoStack.addArrangedSubview(authorLabel)
+        infoStack.addArrangedSubview(sizeLabel)
     }
 
     private func setupConstraints() {
         NSLayoutConstraint.activate([
             photoImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
             photoImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            photoImageView.widthAnchor.constraint(equalToConstant: 80),
-            photoImageView.heightAnchor.constraint(equalToConstant: 80),
-            photoImageView.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -8),
+            photoImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+//            photoImageView.heightAnchor.constraint(equalTo: photoImageView.widthAnchor, multiplier: 9.0/16.0),
 
-            authorLabel.centerYAnchor.constraint(equalTo: photoImageView.centerYAnchor),
-            authorLabel.leadingAnchor.constraint(equalTo: photoImageView.trailingAnchor, constant: 12),
-            authorLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16)
+            infoStack.topAnchor.constraint(equalTo: photoImageView.bottomAnchor, constant: 8),
+            infoStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            infoStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            infoStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+            
+            activityIndicator.centerXAnchor.constraint(equalTo: photoImageView.centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: photoImageView.centerYAnchor),
+
+            errorLabel.centerXAnchor.constraint(equalTo: photoImageView.centerXAnchor),
+            errorLabel.centerYAnchor.constraint(equalTo: photoImageView.centerYAnchor),
+            errorLabel.widthAnchor.constraint(equalTo: photoImageView.widthAnchor),
+            errorLabel.heightAnchor.constraint(equalTo: photoImageView.heightAnchor)
         ])
     }
-
+    
     func configure(with photo: Photo) {
+        guard let url = URL(string: photo.download_url) else { return }
         authorLabel.text = photo.author
-        // giả sử Photo có url string
-        if let url = URL(string: photo.download_url) {
-            // load ảnh async (tạm thời, ví dụ nhanh)
-            DispatchQueue.global().async {
-                if let data = try? Data(contentsOf: url) {
-                    DispatchQueue.main.async {
-                        self.photoImageView.image = UIImage(data: data)
-                    }
-                }
+        sizeLabel.text = "Size: \(photo.width) x \(photo.height)"
+
+        currentURL = url
+        
+        photoImageView.image = nil
+        errorLabel.isHidden = true
+        
+        activityIndicator.startAnimating()
+        
+        if let oldConstraint = aspectConstraint {
+            photoImageView.removeConstraint(oldConstraint)
+        }
+        let aspectRatio = CGFloat(photo.height) / CGFloat(photo.width)
+        let newConstraint = photoImageView.heightAnchor.constraint(equalTo: photoImageView.widthAnchor, multiplier: aspectRatio)
+        newConstraint.isActive = true
+        aspectConstraint = newConstraint
+        
+        ImageLoader.shared.loadImage(from: url) { [weak self] result in
+            guard let self = self else { return }
+
+            if self.currentURL != url { return }
+            
+            switch result {
+            case .success(let image):
+                self.photoImageView.image = image
+                self.activityIndicator.stopAnimating()
+            case .failure(let error):
+                self.activityIndicator.stopAnimating()
+                self.errorLabel.isHidden = false
+                print("Image load error:", error.localizedDescription)
             }
         }
+        
     }
+
+
 }
 

@@ -12,6 +12,16 @@ final class PhotoListViewController: UIViewController {
 
     private let searchBar = SearchBarView()
     private let tableView = UITableView()
+    private let activityIndicator: UIActivityIndicatorView = {
+        let indicator = UIActivityIndicatorView(style: .large)
+        indicator.hidesWhenStopped = true
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        return indicator
+    }()
+    
+    private let viewModel = PhotoListViewModel()
+    private var isLoadingMore: Bool = false
+    private var currentPage: Int = 1
 
     // Data
     private var photosOriginal: [Photo] = []
@@ -19,11 +29,104 @@ final class PhotoListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        print("viewđiload")
+        networkMonitorStart()
+        tapGestureDismisKeyboard()
         setupUI()
         setupConstraints()
         setupTableView()
         setupSearch()
-        fetchPhotos()
+        bindViewModel()
+        startFetchPhotos()
+        UIApplication.shared.isIdleTimerDisabled = false
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        NetworkMonitor.shared.stopMonitoring()
+    }
+    
+    // MARK: - Gesture and dismiss keyboard
+    private func tapGestureDismisKeyboard() {
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        tapGesture.cancelsTouchesInView = false
+        view.addGestureRecognizer(tapGesture)
+    }
+
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
+    }
+    
+    // MARK: - Bind viewmodel
+    private func bindViewModel() {
+        viewModel.didUpdatePhotos = { [weak self] in
+            guard let self = self else { return }
+            print("Fetch successfully, the number of photos: \(self.viewModel.photos.count)")
+
+            if self.viewModel.photos.count == 0 {
+                self.currentPage -= 1
+            } else {
+                self.photosOriginal.append(contentsOf: self.viewModel.photos)
+                self.photosFiltered.append(contentsOf: self.viewModel.photos)
+                self.tableView.reloadData()
+            }
+            self.isLoadingMore = false
+            self.activityIndicator.stopAnimating()          
+        }
+
+        viewModel.didFailWithError = { [weak self] error, didRetry in
+            print("Fetch error: \(error.localizedDescription) \(didRetry)")
+            self?.isLoadingMore = false
+            self?.activityIndicator.stopAnimating()
+
+            if didRetry{
+                AlertHelper.shared.showError(
+                    title: "Error",
+                    message: error.localizedDescription,
+                    retryHandler: {
+                        self?.startFetchPhotos()
+                    },
+                    onCancel: {
+                        self?.currentPage -= 1
+                    }
+                )
+            } else {
+                self?.currentPage -= 1
+                AlertHelper.shared.showError(
+                    title: "Error",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    // MARK: - Network Monitor
+    private func networkMonitorStart() {
+        NetworkMonitor.shared.onStatusChange = { [weak self ] status in 
+            guard let self = self else { return }
+
+            switch status {
+            case .noConnection:
+                AlertHelper.shared.showError(
+                    type: .connection,
+                    title: "Connection Error",
+                    message: "No Internet connection. Please check your Wi-Fi or mobile data."
+                )
+            case .unavailable:
+                AlertHelper.shared.showError(
+                    type: .connection,
+                    title: "Connection Error",
+                    message: "Network connection unavailable. Please check your Internet access."
+                )
+            case .connected:
+                print("Internet Available.")
+                AlertHelper.shared.dismissAlert(for: .connection)
+            case .other:
+                print("Abnormal feedback network.")
+            }
+        }
+
+        NetworkMonitor.shared.startMonitoring()
     }
 
     // MARK: - UI Setup
@@ -31,6 +134,7 @@ final class PhotoListViewController: UIViewController {
         view.backgroundColor = .white
         view.addSubview(searchBar)
         view.addSubview(tableView)
+        view.addSubview(activityIndicator)
         tableView.translatesAutoresizingMaskIntoConstraints = false
         searchBar.translatesAutoresizingMaskIntoConstraints = false
     }
@@ -45,12 +149,17 @@ final class PhotoListViewController: UIViewController {
             tableView.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 8),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        
+            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
-        
-        
-        
-        
+    }
+
+    // MARK: - FetchPhotos
+    private func startFetchPhotos(){
+        activityIndicator.startAnimating()
+        viewModel.loadPhotos(currentPage)
     }
 
     // MARK: - TableView Setup
@@ -58,7 +167,8 @@ final class PhotoListViewController: UIViewController {
         tableView.delegate = self
         tableView.dataSource = self
         tableView.register(PhotoCell.self, forCellReuseIdentifier: "PhotoCell")
-        tableView.rowHeight = 100
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 500
     }
 
     // MARK: - Search Setup
@@ -80,11 +190,6 @@ final class PhotoListViewController: UIViewController {
         }
         tableView.reloadData()
     }
-
-    // MARK: - Fetch Photos
-    private func fetchPhotos() {
-        // Gọi API, gán dữ liệu vào photosOriginal + photosFiltered
-    }
 }
 
 // MARK: - UITableViewDataSource & Delegate
@@ -101,5 +206,23 @@ extension PhotoListViewController: UITableViewDataSource, UITableViewDelegate {
         let photo = photosFiltered[indexPath.row]
         cell.configure(with: photo)
         return cell
+    }
+    
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        let offsetY = scrollView.contentOffset.y
+        let contentHeight = scrollView.contentSize.height
+        let frameHeight = scrollView.frame.size.height
+        
+        if offsetY > contentHeight - frameHeight {
+            loadMorePhotosIfNeeded()
+        }
+    }
+    
+    private func loadMorePhotosIfNeeded(){
+        guard !isLoadingMore else { return }
+        print("Scrolled almost all the way down the table")
+        currentPage += 1
+        isLoadingMore = true
+        startFetchPhotos()
     }
 }
